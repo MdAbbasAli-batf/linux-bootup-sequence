@@ -1,0 +1,574 @@
+
+
+Linux boot-up seqquence: 
+------------------------
+
+
+                                                                                                                      |------------------------------------------------------------------------------------------------------------------------------|
+                                                                                             						  |				MEMORY                                                                                                           |
+                                                  ___3____           _______4___________							  |														         ________8___________                                            |
+                                                  |      |           |                 |     						  |                                                              |                  |                                            |
+                                   |------------> | POST | --------> | Look for the    | --------------|    		  |												 |-------------> | initramfs        |----------------|                           |
+                                   |              |      |           | Bootable device |               |			  |												 |               | /init -> systemd |                |                           |
+                                   |              --------           -------------------               |			  |												 |               --------------------                |                           |
+                    	   _______ |_2____          			 							     ______V_5____		  |	        ______6______                  ______|_7____									   ______V_9____                     |
+ 1                  	   |             |          			 							    |             |       |        |             |                |             |                                     |             |                    |
+power ON  ------Ctrl-----> | BIOS / UEFI | ---------------------Ctrl------------------------->  |     MBR     | -----Ctrl----> |   GRUB2     | -----Ctrl----> |   KERNEL    |--------------Ctrl-----------------> |   systemd   |                    |
+                    	   |             |          			 							    |             |       |        |             |                |             |                                     |  /sbin/init |                    |
+                    	   ---------------          			 							    ---------------       |        ---------------                ---------------                                     ---------------                    |
+								BIOS --> MBR partition disk                                         or GPT            |       /boot/grub2/grub.cfg              initramfs                                       init -> /usr/lib/systemd/systemd     |
+								UEFI --> GPT partition disk															  |                                                                                         PID 1                                |
+																													  |                                                                                                                              |
+																													  |                                                                                                                              |
+BIOS (Basic Input/Output System)																					  |				                                                                                                                 |
+UEFI (Unified Extensible Firmware Interface)																		  |				MEMORY                                                                                                           |
+																													  |______________________________________________________________________________________________________________________________|
+
+
+
+1. Power ON the computer.
+
+2. Basic I/O system (BIOS/UEFI). The first program that is executed which stored in ROM on the motherboard of the PC.
+
+	→ Firmware (BIOS/UEFI): A program that informs a device’s processor how to begin the startup process is considered firmware.
+	→ Firmware is installed directly onto a piece of hardware during manufacturing.
+	→ Computers, mobile phones, and tablets rely on firmware like BIOS and EFI to load their operating systems.
+	
+3. perform POST (power-on self-test) to verify the H/W components are in working condition.
+
+4. Look for a bootable device. If found then handover CONTROL to the first sector of the device i.e. MBR
+
+5. Master Boot Record (MBR). 512 bytes, the first sector of any bootable device contains machine code instructions to boot a machine.
+   it has the following info:
+	→ Boot loader info (446 bytes) — a small low-level code that points to a boot loader [where is the boot loader located?] /boot/grub2/grub.cfg
+	→ Partition table info (64 bytes) [where is the OS located in the filesystem?]
+	→ Error checking (2 bytes)
+   it will load the boot loader (GRUB2) into memory and hand over CONTROL to it.
+
+6. GRand Unified Bootloader (GRUB2)
+	→ It's a program that loads the OS. It used to fit in MBR (446 bytes) but since the size is increasing the complexity of OS is increasing. It's not a single program, it allows the filesystem to be interpreted properly.
+	→ Loaded from /boot/grub2/grub.cfg into memory by MBR at boot time
+	→ user can see GUI asking to select different OS or kernels to boot from.
+	→ once selected the kernel, it locates the corresponding kernel executable.
+			/boot/vmlinuz-4.18.0-408.el8.x86_64
+	→ main job is to load kernel and initramfs [initramfs-4.18.0–408.el8.x86_64.img] into memory.
+	→ once the kernel is loaded into RAM, it passes CONTROL to it.
+	
+7. Kernel:
+	→ Once the Linux kernel has control over the system (which it gets after being loaded by the boot loader), it prepares its memory structures and drivers (initializes hardware). The kernel is booting.
+	→ we can see a lot of messages, that can be suppressed through RHGB & quiet. [To enable messaging modify the parameter GRUB_CMDLINE_LINUX in /etc/default/grub; then run #grub2-mkconfig > /boot/grub2/grub.cfg and reboot]
+	→ Some Linux-based computer systems require an initramfs to boot properly. If present, then the kernel will execute /init script from the initramfs.
+	→ Systems with exotic drivers or setups, or encrypted file systems need initramfs so the Linux kernel is capable of handing over control to the init binary on their system.
+
+8. initramfs: ref-10
+	→ An initramfs is an initial ram file system based on tmpfs. It provides early userspace which can do things that kernel can’t do during boot time.
+	→ It contains the tools and scripts needed to mount the file systems before the init binary on the real root file system is called.
+	→ These tools can be decryption abstraction layers (for encrypted file systems), logical volume managers, software raid, bluetooth driver based file system loaders, etc.
+	→ At boot time, the kernel checks for the presence of the initramfs or the boot loader informs the Linux kernel that an initramfs is loaded.
+	→ If found, the Linux kernel will create a tmpfs file system, extract the contents of the archive on it, and then launch the /init script located in the root of the tmpfs file system. 
+		  [An initramfs contains at least one file called /init. This file is executed by the kernel as the main init process (PID 1). It has to do all the work.] ref-7
+	→ This script then mounts the real root file system under /sysroot (after making sure it can mount it, for instance by loading additional modules, preparing an encryption abstraction layer, etc.) as well as vital other file systems (such as /usr and /var ).
+	→ Once the root file system and the other vital file systems are mounted, the init script from the initramfs will switch the root towards the real root file system (remember it is switch_root operation NOT pivot_root).
+		  [switch_root operation is to switch /sysroot into a real root filesystem, start executing stuff from there and then remove the initramfs from memory.]
+	→ finally call the /sbin/init (init -> /usr/lib/systemd/systemd) binary on that system’s real root filesystem as the main init process (PID 1 — inherited from initramfs /init, see exec details) to continue the boot process.
+
+9. systemd:
+	→ First service loaded with PID 1
+	→ mounting the filesystem from /etc/fstab.
+	→ start all required services and processes in parallel.
+		  [/etc/systemd/system/default.target]
+	→ it starts looking for the file for the required dependencies to boot into the default target.
+	→ once the default target is up and the user can see the login prompt then we can say the system boot-up is successful.
+
+
+ref-24, 25,26:
+Generally speaking, the boot-time text messages are divided into two major categories: kernel initialization output and service startup/status output.
+Most Unix distros store a post-boot copy of the message buffer at /var/log/dmesg
+view Linux boot messages using dmesg command
+Kernel initialization
+Kernel initialization output is often disabled by default in modern distributions by passing the quiet kernel command line parameter.
+Examples of kernel initialization messages are:
+RAM map of usable/unusable/reserved/etc memory regions
+CPU details, MTRR, delay loop calibration metrics ("BogoMIPS")
+Hardware initialization (controllers for things like ACPI, PCI, USB;
+Service startup: ref-24
+After the kernel has initialized, control of the boot process is handed over to a userland process called init. Normally on Linux, this is /sbin/init, 
+although it is possible to pass a different init path to the kernel using the init=... parameter which will be executed in its place. 
+This process controls the startup of non-kernel processes; things like networking, system events logging, fan control, mounting of file systems (both local and remote), hard disk monitoring, audio, server processes, 
+UPS and laptop battery monitoring, CPU frequency stepping, etc. are launched through scripts executed by init. 
+At some point init will start some process that makes it possible to log in to the system; this can be a text-based login process on the console, a SSH server, or a display manager that in turn launches X Window.
+
+This is the part of the startup where on a text boot display you'll normally see a lot of processes starting up and in some manner being reported as started OK, with more or less (usually less) verbose diagnostic output in between.
+
+ref-1:
+You can view the contents of the /var/log/messages file. This file contains boot and startup messages as well as messages generated by the operating system during normal operation. 
+You can also use the journalctl command without any options to view the systemd journal, which contains essentially the same information:
+
+[root@rnd log]# journalctl --list-boots
+ 0 40c8acb11a4f4500ac8fc684967d928d Thu 2023-08-17 09:58:14 EEST—Thu 2023-08-17 11:25:14 EEST
+[root@rnd log]# journalctl
+-- Logs begin at Thu 2023-08-17 09:58:14 EEST, end at Thu 2023-08-17 11:25:26 EEST. --
+Aug 17 09:58:14 rnd.devops-fi.com kernel: Linux version 4.18.0-408.el8.x86_64 (mockbuild@kbuilder.bsys.centos.org) (gcc version 8.5.0 20210514 (Red Hat 8.5.0-14) (GCC)) #1 SMP Mon Jul 18 17:42:52>
+Aug 17 09:58:14 rnd.devops-fi.com kernel: Command line: BOOT_IMAGE=(hd0,msdos1)/vmlinuz-4.18.0-408.el8.x86_64 root=UUID=e411ea4d-4a94-4a00-95d7-d8081afaa962 ro crashkernel=auto resume=UUID=d45764>
+Aug 17 09:58:14 rnd.devops-fi.com kernel: Disabled fast string operations
+
+[root@rnd log]# grep 'Aug 17 09:58' /var/log/messages
+Aug 17 09:58:14 rnd kernel: Command line: BOOT_IMAGE=(hd0,msdos1)/vmlinuz-4.18.0-408.el8.x86_64 root=UUID=e411ea4d-4a94-4a00-95d7-d8081afaa962 ro crashkernel=auto resume=UUID=d4576449-fc6e-4dc7-8e49-cccf8fc902b0
+Aug 17 09:58:14 rnd kernel: Disabled fast string operations
+Aug 17 09:58:14 rnd kernel: x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+Aug 17 09:58:14 rnd kernel: x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+Aug 17 09:58:14 rnd kernel: x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+Aug 17 09:58:14 rnd kernel: x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+Aug 17 09:58:14 rnd kernel: x86/fpu: Enabled xstate features 0x7, context size is 832 bytes, using 'compacted' format.
+Aug 17 09:58:14 rnd kernel: signal: max sigframe size: 1776
+Aug 17 09:58:14 rnd kernel: BIOS-provided physical RAM map:
+Aug 17 09:58:14 rnd kernel: BIOS-e820: [mem 0x0000000000000000-0x000000000009ebff] usable
+Aug 17 09:58:14 rnd kernel: BIOS-e820: [mem 0x000000000009ec00-0x000000000009ffff] reserved
+Aug 17 09:58:14 rnd kernel: BIOS-e820: [mem 0x00000000000dc000-0x00000000000fffff] reserved
+Aug 17 09:58:14 rnd kernel: BIOS-e820: [mem 0x0000000000100000-0x00000000bfecffff] usable
+Aug 17 09:58:14 rnd kernel: BIOS-e820: [mem 0x00000000bfed0000-0x00000000bfefefff] ACPI data
+Aug 17 09:58:14 rnd kernel: BIOS-e820: [mem 0x00000000bfeff000-0x00000000bfefffff] ACPI NVS
+Aug 17 09:58:14 rnd kernel: BIOS-e820: [mem 0x00000000bff00000-0x00000000bfffffff] usable
+
+
+[abbas@rnd ~]$
+[abbas@rnd ~]$ sudo su -
+[root@rnd ~]# dmesg
+[    0.000000] Linux version 4.18.0-408.el8.x86_64 (mockbuild@kbuilder.bsys.centos.org) (gcc version 8.5.0 20210514 (Red Hat 8.5.0-14) (GCC)) #1 SMP Mon Jul 18 17:42:52 UTC 2022
+[    0.000000] Command line: BOOT_IMAGE=(hd0,msdos1)/vmlinuz-4.18.0-408.el8.x86_64 root=UUID=e411ea4d-4a94-4a00-95d7-d8081afaa962 ro crashkernel=auto resume=UUID=d4576449-fc6e-4dc7-8e49-cccf8fc902b0
+[    0.000000] Disabled fast string operations
+[    0.000000] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.000000] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.000000] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.000000] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.000000] x86/fpu: Enabled xstate features 0x7, context size is 832 bytes, using 'compacted' format.
+[    0.000000] signal: max sigframe size: 1776
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009ebff] usable
+[    0.000000] BIOS-e820: [mem 0x000000000009ec00-0x000000000009ffff] reserved
+[    0.000000] BIOS-e820: [mem 0x00000000000dc000-0x00000000000fffff] reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x00000000bfecffff] usable
+[    0.000000] BIOS-e820: [mem 0x00000000bfed0000-0x00000000bfefefff] ACPI data
+[    0.000000] BIOS-e820: [mem 0x00000000bfeff000-0x00000000bfefffff] ACPI NVS
+[    0.000000] BIOS-e820: [mem 0x00000000bff00000-0x00000000bfffffff] usable
+[    0.000000] BIOS-e820: [mem 0x00000000f0000000-0x00000000f7ffffff] reserved
+[    0.000000] BIOS-e820: [mem 0x00000000fec00000-0x00000000fec0ffff] reserved
+[    0.000000] BIOS-e820: [mem 0x00000000fee00000-0x00000000fee00fff] reserved
+[    0.000000] BIOS-e820: [mem 0x00000000fffe0000-0x00000000ffffffff] reserved
+[    0.000000] BIOS-e820: [mem 0x0000000100000000-0x000000013fffffff] usable
+[    0.000000] NX (Execute Disable) protection: active
+
+
+
+switch_root - switch to another filesystem as the root of the mount tree.
+Description
+switch_root moves already mounted /proc, /dev and /sys to newroot and makes newroot the new root filesystem and starts init process.
+WARNING: switch_root removes recursively all files and directories on the current root filesystem.
+Return Value
+switch_root returns 0 on success and 1 on failure.
+
+# Change to the new root partition and execute /sbin/init
+echo "Executing switch_root and spawning init"
+if ! exec switch_root /sysroot /sbin/init
+then
+        echo "Couldn't switch_root"
+        $MOUNT -t proc proc /proc
+        exec $SHELL  #SHELL=RESCUE_SHELL
+fi
+
+exec:
+In computing, exec is a functionality of an operating system that runs an executable file in the context of an already existing process, replacing the previous executable. This act is also referred to as an overlay. 
+As no new process is created, the process identifier (PID) does not change, but the machine code, data, heap, and stack of the process are replaced by those of the new program.
+The exec command in Linux is used to execute a command from the bash itself. This command does not create a new process, it just replaces the bash with the command to be executed. If the exec command is successful, it does not return to the calling process.
+
+if any command executed with exec <command> then it doesn't create any new process so no new pid. Without using exec it will create a child process with new pid
+[abbas@rnd ~]$ echo $$
+105281
+[abbas@rnd ~]$ pstree -sp 105281
+systemd(1)───sshd(1066)───sshd(105272)───sshd(105279)───bash(105281)───pstree(113408)
+[abbas@rnd ~]$
+[abbas@rnd ~]$ ps -ef | grep pts | grep -v grep
+abbas     105281  105279  0 06:18 pts/1    00:00:00 -bash
+[abbas@rnd ~]$
+[abbas@rnd ~]$ exec sleep 30
+[abbas@rnd ~]$ ps -ef | grep pts | grep -v grep
+abbas     105281  105279  0 06:18 pts/1    00:00:00 sleep 30
+
+[abbas@rnd ~]$ sleep 30
+[abbas@rnd ~]$ ps -ef | grep pts | grep -v grep
+abbas     105281  105279  0 06:18 pts/1    00:00:00 -bash
+abbas     113690  105281  0 09:25 pts/1    00:00:00 sleep 30
+
+
+
+Kernel panics: ref-7
+When working with initramfs and writing custom init scripts for it, the following kernel panic may be encountered on boot:
+
+Kernel panic - not syncing: Attempted to kill init!
+This is not an error in the kernel, but an error in the /init script. This script is executed as the init process with PID 1. Unlike other processes, the PID 1 init process is special. It is the only process that is started by the kernel on boot. It's the process that takes care of starting other processes (boot process, init scripts) which in turn start other processes (daemons, login prompts, X), which in turn start other processes (bash, window manager, browser, ...). The init process is the mother of all other processes, and therefore it mustn't be killed. On shutdown, it's again the init process that takes care of cleaning up by shutting down other processes first, then running processes that will unmount the filesystems, until it is safe to actually do a shutdown without corrupting anything.
+
+If there is some error in the /init script, that causes the init process to end, this basically means there are no processes left to run, there is nothing that could take care of cleaning up, and the kernel has no choice but to panic. For this reason there are some things in /init that can't be done like in a normal shell script, like using return or exit, or letting the script just run a series of commands and then simply end.
+
+If /init should end, pass the responsibility of the init process to another process using exec. See the examples above how exec is used to either run /sbin/init of the mounted root partition or to run a rescue shell in case something went wrong.
+
+
+This file is executed by the kernel as the main init process (PID 1)
+tmpfs (a size-flexible, in-memory lightweight file system)
+exec switch_root /newroot /sbin/init
+If /init should end, pass the responsibility of the init process to another process using exec. See the examples below how exec is used to either run /sbin/init of the mounted root partition or to run a rescue shell in case something went wrong. ref-7
+ref-16  
+  # Now switch to the new filesystem, and run /sbin/init out of it.  Don't forget the "exec" here, because you want the new init program to inherit PID 1
+  # PID 1.
+
+  exec switch_root /sysroot /sbin/init
+       switch_root newroot init [arg...]
+
+
+# Change to the new root partition and execute /sbin/init
+echo "Executing switch_root and spawning init"
+if ! exec $SWITCH "$NEWROOT" "$INIT" $INIT_ARGS
+# exec switch_root /sysroot /sbin/init
+#if ! exec $SWITCH "$NEWROOT" "$INIT" "$@"
+then
+        echo ""
+        echo "Couldn't switch_root"
+        $MOUNT -t proc proc /proc
+        exec $SHELL
+fi
+
+
+exec [-cl] [-a name] [command [arguments]]
+              If  command  is  specified,  it replaces the shell.  No new process is created.  The arguments become the arguments to command.
+
+In computing, exec is a functionality of an operating system that runs an executable file in the context of an already existing process, replacing the previous executable. 
+This act is also referred to as an overlay. It is especially important in Unix-like systems, although it exists elsewhere. 
+As no new process is created, the process identifier (PID) does not change, but the machine code, data, heap, and stack of the process are replaced by those of the new program.
+
+
+pivot_root can/should be used together with chroot
+     
+       pivot_root new_root put_old
+        ## pivot_root moves the root file system of the current process to the directory put_old and makes new_root the new root file system.  
+       cd new_root
+       pivot_root . old-root
+       exec chroot . command
+       umount /old-root
+
+ref-7:
+/usr/src/initramfs/initOption to drop to the rescue shell
+break_requested() {
+    local want_break
+    for o in $(cat /proc/cmdline) ; do
+        case "$o" in
+            rd.break|rdbreak)                                        want_break="yes" ;;
+            init=/bin/sh|init=/bin/bb|init=/bin/bash|init=/bin/dash) want_break="yes" ;;
+        esac
+    done
+    echo "${want_break}"
+}
+
+if [[ -n "$(break_requested)" ]] ; then
+    rescue_shell
+fi
+
+umount /proc
+umount /sys
+umount /dev
+
+exec switch_root /newroot /sbin/init
+
+
+[root@rnd abbas]# ll /boot/
+total 229772
+-rw-r--r--. 1 root root   190563 Dec  4  2020 config-4.18.0-257.el8.x86_64
+-rw-r--r--. 1 root root   196660 Jul 18  2022 config-4.18.0-408.el8.x86_64
+drwxr-xr-x. 3 root root       17 Dec 27  2020 efi
+drwx------. 4 root root       83 Aug 14 11:36 grub2
+-rw-------. 1 root root 81660433 Dec 27  2020 initramfs-0-rescue-3bd3f7dd87194518886d62b7632a8391.img
+-rw-------. 1 root root 30203969 Dec 11  2022 initramfs-4.18.0-257.el8.x86_64.img
+-rw-------. 1 root root 27122176 Dec 11  2022 initramfs-4.18.0-257.el8.x86_64kdump.img
+-rw-------. 1 root root 30318611 Dec 11  2022 initramfs-4.18.0-408.el8.x86_64.img
+-rw-------. 1 root root 27241472 Aug 10 14:25 initramfs-4.18.0-408.el8.x86_64kdump.img
+drwxr-xr-x. 3 root root       21 Dec 27  2020 loader
+lrwxrwxrwx. 1 root root       45 Dec 11  2022 symvers-4.18.0-408.el8.x86_64.gz -> /lib/modules/4.18.0-408.el8.x86_64/symvers.gz
+-rw-------. 1 root root  4093083 Dec  4  2020 System.map-4.18.0-257.el8.x86_64
+-rw-------. 1 root root  4388961 Jul 18  2022 System.map-4.18.0-408.el8.x86_64
+-rwxr-xr-x. 1 root root  9653384 Dec 27  2020 vmlinuz-0-rescue-3bd3f7dd87194518886d62b7632a8391
+-rwxr-xr-x. 1 root root  9653384 Dec  4  2020 vmlinuz-4.18.0-257.el8.x86_64
+-rwxr-xr-x. 1 root root 10538120 Jul 18  2022 vmlinuz-4.18.0-408.el8.x86_64
+
+
+ref-6:
+vmlinuz is the name of the Linux kernel executable.
+A kernel is a program that constitutes the central core of a computer operating system. 
+It is the first thing that is loaded into memory when a computer is booted up (i.e., started), and it remains in memory for the entire time that the computer is in operation.
+vmlinuz is a compressed Linux kernel, and it is bootable. Bootable means that it is capable of loading the operating system into memory so that the computer becomes usable and application programs can be run.
+vmlinuz should not be confused with vmlinux, which is the kernel in a non-compressed and non-bootable form. vmlinux is generally just an intermediate step to producing vmlinuz.
+
+ref-10
+ --> Once the Linux kernel has control over the system (which it gets after being loaded by the boot loader), it prepares its memory structures and drivers.
+ --> It then hands over control to an application (usually init) whose task is to further prepare the system and make sure that, at the end of the boot process, all necessary services are running and the user is able to log on.
+ --> The init application does that by launching, among other services, the udev daemon who will further load up and prepare the system based on the detected devices.
+ --> When udev is launched, all remaining file systems that have not been mounted are mounted, and the remainder of services is started.
+For systems where all necessary files and tools reside on the same file system, the init application can perfectly control the further boot process. 
+But when multiple file systems are defined (or more exotic installations are done), this might become a bit more tricky:
+
+udev - Dynamic device management
+
+The initial ram file system:
+An initramfs is an initial ram file system based on tmpfs (a size-flexible, in-memory lightweight file system).
+It contains the tools and scripts needed to mount the file systems before the init binary on the real root file system is called. 
+These tools can be decryption abstraction layers (for encrypted file systems), logical volume managers, software raid, bluetooth driver based file system loaders, etc.
+
+The content of the initramfs is made by creating a cpio archive. (dracut and genkernel)
+All files, tools, libraries, configuration settings (if applicable), etc. are put into the cpio archive. This archive is then compressed using the gzip utility and stored alongside the Linux kernel.
+The boot loader will then offer it to the Linux kernel at boot time so the kernel knows an initramfs is needed.
+
+Once detected, the Linux kernel will create a tmpfs file system, extract the contents of the archive on it, and then launch the init script located in the root of the tmpfs file system.
+This script then mounts the real root file system (after making sure it can mount it, for instance by loading additional modules, preparing an encryption abstraction layer, etc.) as well as vital other file systems (such as /usr and /var ).
+Once the root file system and the other vital file systems are mounted, the init script from the initramfs will switch the root towards the real root file system (pivot_root). 
+pivot_root operation to switch /sysroot into a real root filesystem, start executing stuff from there and then remove the initramfs from memory.
+finally call the /sbin/init binary on that system's real root filesystem to continue the boot process.
+
+tmpfs (temporary file system) (formerly known as shmfs) is a virtual filesystem created to store files in dynamic (volatile) memory. tmpfs is typically created on RAM.
+Several automated tools exist that help users create initramfs (compressed cpio archives) for their system. Most commonly used are dracut and genkernel.
+
+
+ref-7,8:
+WHY initramfs:
+LFS:
+For most distributions, kernel modules are the biggest reason to have an initramfs. In a general distribution, there are many unknowns such as file system types and disk layouts.
+Gentoo-guide:
+Some Linux-based computer systems require an initramfs to boot properly.
+Systems with exotic drivers or setups, or encrypted file systems need initramfs so the Linux kernel is capable of handing over control to the init binary on their system.
+  -->When the /usr partition is on a separate file system, tools and drivers that have files stored within /usr cannot be used unless /usr is available. If those tools are needed to make /usr available, then we cannot boot up the system.
+  -->If the root file system is encrypted, then the Linux kernel will not be able to find the init application, resulting in an unbootable system.
+The solution for this problem has long since been to use an initrd (initial root device) or initramfs (initial ram file system).
+
+QUORA:
+The Linux kernel is modular, which is to say it supports the dynamic loading and unloading of object files. Many parts of the kernel can be made into a module, for example support for a given filesystem type or a driver to access a particular disk.
+This allows Linux systems to build kernels with only the bare essentials compiled into the main kernel image but provide functionality for every other conceivable feature and hardware as a module, allowing the user to load or not load them as needed.
+But what if the root filesystem is on a filesystem or disk that requires a kernel module to access? You wouldn't be able to boot! You'd need the modules to access the disk, but the modules are on the disk. 
+initramfs solves this problem by allowing the kernel to access the modules from a special RAM filesystem, avoiding any chicken-or-the-egg problem.
+
+Gentoo-custom
+Using initramfs is optional. By default, the kernel initializes hardware using built-in drivers, mounts the specified root partition, loads the init system of the installed Linux distribution. 
+The init system then loads additional modules and starts services until it eventually presents a log in dialog. This is a good default behavior and sufficient for many users. 
+initramfs is for users with advanced requirements; for users who need to do things as early as possible, even before the root partition is mounted.
+
+Typically, an initramfs is not needed, but may be necessary for:
+Mounting an encrypted, logical, or otherwise special root partition (rootfs from network)
+Providing a minimalistic rescue shell (if something goes wrong)
+Customize the boot process (e.g., print a welcome message)
+Load modules necessary to boot (e.g., third party storage drivers)
+Anything the kernel can't do that's usually handled in user space
+
+
+WHAT is initramfs:
+initramfs is a root filesystem that is embedded into the kernel and loaded at an early stage of the boot process. It is the successor of initrd. 
+It provides early userspace which can do things the kernel can't easily do by itself during the boot process.
+
+QUORA:
+initramfs, short for initial RAM filesystem, is a cpio archive of the initial filesystem loaded into memory after the kernel finishes initializing the system and before user-space begins the init process. 
+The Linux kernel mounts the contents of initramfs as the initial root filesystem, before the real root (e.g. on your hard drive) is mounted. 
+This initial root contains files needed to mount the real root filesystem and initialize your system—the most important bits being kernel modules.
+
+LFS
+The only purpose of an initramfs is to mount the root filesystem. The initramfs is a complete set of directories that you would find on a normal root filesystem. It is bundled into a single cpio archive and compressed with one of several compression algorithms.
+At boot time, the boot loader loads the kernel and the initramfs image into memory and starts the kernel. The kernel checks for the presence of the initramfs and, if found, mounts it as / and runs /init. 
+The init program is typically a shell script. Note that the boot process takes longer, possibly significantly longer, if an initramfs is used.
+
+
+
+
+
+ref-11:
+The userspace init is called instead of prepare_namespace. All finding of the root device, and md setup happens in userspace.
+
+ref-10:
+the udev daemon who will further load up and prepare the system based on the detected devices. When udev is
+udev - Dynamic device management
+
+step-6,7 in the diagram:
+----------------------
+At boot, the bootloader (usually GRUB) loads 2 files: 
+ --> the kernel and 
+ --> the initramfs (also known as initrd) file. 
+The initramfs file contains a minimal filesystem that includes any tools and kernel modules required to activate the real root filesystem, its disk controller(s) and other features necessary to activate it.
+
+The rd.break boot option tells the boot sequence to stop while the system is still using initramfs, but the real root filesystem is already mounted at /sysroot. 
+Normally the next step would be a pivot_root operation to switch /sysroot into a real root filesystem, start executing stuff from there and then remove the initramfs from memory.
+
+By stopping within the initramfs we gain access to the emergency shell. But the initramfs has a very limited number of commands available, and 
+editing the initramfs's /etc/passwd file would achieve nothing as the entire initramfs gets replaced by the real root filesystem anyway.
+
+The root filesystem is initially mounted in read-only mode in order to allow filesystem checking. The first step is to remount it read-write, to allow the password change to stick.
+
+The chroot /sysroot command means: "start a new shell in such a way that for that shell the /sysroot directory will appear as /." Within that chrooted shell, 
+/etc/passwd and /etc/shadow will refer to the real password files in the real root filesystem, and /bin/passwd will be the same command 
+
+the first exit command will exit the chrooted shell and return you to the initial emergency shell,
+The second exit command will return control to the boot scripts, which usually trigger a reboot
+
+
+single user mode / emergency mode: Ref-5
+-------------------------------------------------
+To interrupt the automatic boot, reboot your system and press any key on the GRUB2 splash screen.
+This will display the list of kernels available on your system. Select the latest kernel and press the "e" key to edit the selected kernel parameters.
+
+Method-1: Boot CentOS/RHEL 7/8 systems in single user mode by adding the “rd.break” parameter to the kernel
+switch_root:/# mount -o remount,rw /sysroot
+switch_root:/# chroot /sysroot
+bash-4.4# passwd root or fix any other problem using normal commands
+bash-4.4# touch /.autorelabel [ls -lZ check foe SELinux tag]
+bash-4.4# exit
+switch_root:/# exit
+
+Method-2: replacing the “rhgb quiet” word with the “init=/bin/bash or init=/bin/sh” parameter in the kernel
+Method-3: replacing the “ro” word with the “rw init=/sysroot/bin/sh” parameter in the kernel
+-------------------------------------
+
+
+
+
+
+1 Linux startup with systemd: ref-1
+----------------------------------------------
+Normally, most distributions use a startup animation or splash screen to hide the detailed messages
+The main GRUB configuration file is /boot/grub2/grub.cfg [can be overwritten when the kernel version is updated]
+Instead, modify the /etc/default/grub
+---
+[root@testvm1 ~]# cd /etc/default ; cat grub
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR="$(sed 's, release .*$,,g' /etc/system-release)"
+GRUB_DEFAULT=saved
+GRUB_DISABLE_SUBMENU=true
+GRUB_TERMINAL_OUTPUT="console"
+GRUB_CMDLINE_LINUX="resume=/dev/mapper/fedora_testvm1-swap rd.lvm.
+lv=fedora_testvm1/root rd.lvm.lv=fedora_testvm1/swap rd.lvm.lv=fedora_
+testvm1/usr rhgb quiet"
+GRUB_DISABLE_RECOVERY="true"
+[root@testvm1 default]#
+---
+GRUB_TIMEOUT=10
+GRUB_CMDLINE_LINUX"resume=/dev/mapper/fedora_testvm1-swap rd.lvm.
+lv=fedora_testvm1/root rd.lvm.lv=fedora_testvm1/swap rd.lvm.lv=fedora_
+testvm1/usr"
+[root@testvm1 grub2]# grub2-mkconfig > /boot/grub2/grub.cfg
+reboot
+
+
+
+
+
+
+Units are the basis of everything in systemd.
+
+3.7 systemd-units ref-2
+------------------------------
+[root@testvm1 ~]# systemctl get-default
+graphical.target
+[root@testvm1 ~]# runlevel
+N 5
+Switching to a different target
+[root@testvm1 ~]# systemctl isolate multi-user.target
+
+One of these experiments requires the sysstat package
+$ dnf -y install sysstat
+SAR Report
+
+Units are the basis of everything systemd.
+There are a number of unit file types, some of these unit file types by their filename extensions
+.device  .mount  .service  .slice  .target  .timer
+
+.service --> The .service unit files define processes that are managed by systemd.
+.slice --> The .slice unit defines a “slice,” which is a conceptual division of system resources that are related to a group of processes.
+.target --> The .target units define groups of unit files that define startup synchronization points, runlevels, and services.
+.timer --> The .timer unit defines timers that can initiate program execution at specified times.
+
+systemctl:
+systemd provides the systemctl command that is used to start and stop services, configure them to launch (or not) at system startup, and monitor the current status of running services.
+[root@testvm1 ~]# systemctl
+list all of the loaded and active systemd units
+Pass --all to see loaded but inactive units
+To show all installed unit files use 
+[root@testvm1 ~]# systemctl list-unit-files
+[root@testvm1 ~]# systemctl list-unit-files -t timer
+
+List units that systemd currently has in memory. By default only units which are active, have pending jobs, or have failed are shown
+systemctl list-units --state=failed
+systemctl list-units --type=service --state=failed
+[root@testvm1 ~]# systemctl list-units --type target
+UNIT                   LOAD   ACTIVE SUB    DESCRIPTION 
+[root@testvm1 ~]# systemctl --all -t service
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+REFERENCES:
+----------------
+1. https://opensource.com/article/20/5/systemd-startup
+2. https://opensource.com/article/20/5/systemd-units
+3. https://opensource.com/article/20/4/systemd
+4. https://www.quora.com/What-is-chroot-Sysroot
+5. https://blog.csdn.net/flynetcn/article/details/131828832
+6. https://www.linfo.org/vmlinuz.html
+7. https://wiki.gentoo.org/wiki/Custom_Initramfs
+8. https://www.linuxfromscratch.org/blfs/view/svn/postlfs/initramfs.html
+9. https://www.quora.com/What-exactly-is-the-initramfs-program-in-Linux-Is-it-a-script-binary-or-what
+10. https://wiki.gentoo.org/wiki/Initramfs/Guide
+11. https://wiki.ubuntu.com/Initramfs
+12. https://www.youtube.com/watch?v=saovaEhA85g
+13. https://www.youtube.com/watch?v=sebgrmiYdk4
+14. https://sourcemage.org/HowTo/initramfs
+15. https://web.archive.org/web/20160730094856/http://wiki.sourcemage.org/HowTo(2f)Initramfs.html
+16. https://tiebing.blogspot.com/2014/02/linux-switchroot-vs-pivotroot-vs-chroot.html
+17. https://unix.stackexchange.com/questions/126217/when-would-you-use-pivot-root-over-switch-root
+18. https://linux.die.net/man/8/pivot_root
+19. https://linux.die.net/man/8/switch_root
+20. https://en.wikipedia.org/wiki/Exec_(system_call)
+21. https://www.baeldung.com/linux/exec-command-in-shell-script
+22. https://eng.libretexts.org/Bookshelves/Computer_Science/Operating_Systems/Linux_-_The_Penguin_Marches_On_(McClanahan)/13%3A_Working_with_Bash_Scripts/3.09%3A_Positional_Parameters_exec_Command_source_Command#:~:text=The%20exec%20command%20in%20Linux,return%20to%20the%20calling%20process.
+23. https://en.wikipedia.org/wiki/Overlay_(programming)
+24. https://superuser.com/questions/782008/linux-boot-time-scrolling-messages
+25. https://itnixpro.com/how-to-view-linux-boot-messages-using-dmesg-command/?utm_content=cmp-true
+26. https://linux-audit.com/finding-boot-logs-in-systemd-journals/
+27. https://www.loggly.com/ultimate-guide/using-journalctl/
+
+
+
+
+
+
+
+
+
+
+
+
+
