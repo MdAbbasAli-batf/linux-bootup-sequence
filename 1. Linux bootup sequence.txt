@@ -544,7 +544,7 @@ REFERENCES:
 10. https://wiki.gentoo.org/wiki/Initramfs/Guide
 11. https://wiki.ubuntu.com/Initramfs
 12. https://www.youtube.com/watch?v=saovaEhA85g
-13. https://www.youtube.com/watch?v=sebgrmiYdk4
+13. https://www.youtube.com/watch?v=sOIOY6Ks0xA&t=423s
 14. https://sourcemage.org/HowTo/initramfs
 15. https://web.archive.org/web/20160730094856/http://wiki.sourcemage.org/HowTo(2f)Initramfs.html
 16. https://tiebing.blogspot.com/2014/02/linux-switchroot-vs-pivotroot-vs-chroot.html
